@@ -1,18 +1,11 @@
 package main
 
 import (
-	"context"
 	_ "embed"
-	"encoding/json"
 	"log/slog"
 	"os"
-	"strings"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/metarsit/riskiiit/internal/web3/riskiiit"
 )
 
@@ -28,73 +21,15 @@ var (
 )
 
 func main() {
-	// 1. Initialize the Websocket client
-	client, err := ethclient.Dial(wsURL)
+	wsClient, err := riskiiit.NewWSClient(wsURL, abiJSON)
 	if err != nil {
-		slog.Error("Failed to connect to the Ethereum client", "error", err)
+		slog.Error("Failed to create WS client", "error", err)
 		os.Exit(1)
 	}
-	defer client.Close()
+	defer wsClient.Close()
 
-	// 2. Parse the ABI (We will to find it on Abscan)
-	// https://abscan.org/address/0xebac5872d5d3a53e03c6953bee7584201dd38759#code
-	parsedABI, err := abi.JSON(strings.NewReader(abiJSON))
-	if err != nil {
-		slog.Error("Failed to parse the ABI", "error", err)
+	if err := wsClient.Subscribe(); err != nil {
+		slog.Error("Failed to subscribe to events", "error", err)
 		os.Exit(1)
-	}
-
-	// 3. Filtering the events from Smart Contract Address
-	query := ethereum.FilterQuery{
-		Addresses: []common.Address{riskiiitAddress},
-	}
-
-	// 4. Start subscribing to the events (as well as the socket)
-	logs := make(chan types.Log)
-	sub, err := client.SubscribeFilterLogs(context.Background(), query, logs)
-	if err != nil {
-		slog.Error("Failed to subscribe to the events", "error", err)
-		os.Exit(1)
-	}
-	defer sub.Unsubscribe()
-
-	// 5. Create a function to handle the events
-	slog.Info("Starting to listen for events")
-	for {
-		select {
-		case err := <-sub.Err():
-			slog.Error("Subscription error", "error", err)
-		case vLog := <-logs:
-			event, err := parsedABI.EventByID(vLog.Topics[0])
-			if err != nil {
-				slog.Error("Failed to get event by ID", "error", err)
-				continue
-			}
-
-			m := make(map[string]interface{})
-			if event.Name != "SpinResolved" {
-				slog.Debug("Skipping event", "event", event.Name)
-				continue
-			}
-
-			if err := parsedABI.UnpackIntoMap(m, event.Name, vLog.Data); err != nil {
-				slog.Error("Failed to unpack into map", "error", err)
-				continue
-			}
-
-			b, err := json.Marshal(m)
-			if err != nil {
-				slog.Error("Failed to marshal map", "error", err)
-				continue
-			}
-
-			var spinEvent riskiiit.SpinResolvedEvent
-			if err := json.Unmarshal(b, &spinEvent); err != nil {
-				slog.Error("Failed to unmarshal event", "error", err)
-				continue
-			}
-
-			slog.Info("Event", "event", spinEvent.String())
-		}
 	}
 }
