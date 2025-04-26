@@ -5,10 +5,8 @@ import (
 	"math/big"
 )
 
-type Color int
-
 const (
-	Red Color = iota
+	Red uint8 = iota
 	Black
 	Green
 )

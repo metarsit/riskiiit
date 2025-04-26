@@ -4,8 +4,12 @@ import (
 	_ "embed"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/metarsit/riskiiit/internal/metrics"
 	"github.com/metarsit/riskiiit/internal/web3/riskiiit"
 )
 
@@ -21,6 +25,10 @@ var (
 )
 
 func main() {
+	c := make(chan riskiiit.SpinResolvedEvent)
+	defer close(c)
+
+	// Initialization
 	wsClient, err := riskiiit.NewWSClient(wsURL, abiJSON)
 	if err != nil {
 		slog.Error("Failed to create WS client", "error", err)
@@ -28,8 +36,36 @@ func main() {
 	}
 	defer wsClient.Close()
 
-	if err := wsClient.Subscribe(); err != nil {
-		slog.Error("Failed to subscribe to events", "error", err)
+	metrics, err := metrics.NewMetrics()
+	if err != nil {
+		slog.Error("Failed to create metrics", "error", err)
 		os.Exit(1)
 	}
+
+	// Application
+	slog.Info("Subscribing to events")
+	go wsClient.Subscribe(c)
+	slog.Info("Collecting metrics")
+	go metrics.Collect(c)
+
+	go func() {
+		// every 2 seconds print the metrics
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				data := metrics.GetScore()
+				slog.Info("Metrics", "red", data.Red, "black", data.Black, "green", data.Green, "house", data.House, "player", data.Player)
+			}
+		}
+	}()
+
+	// Block exit
+	exit := make(chan os.Signal, 1)
+	signal.Notify(exit, os.Interrupt, syscall.SIGTERM)
+	<-exit
+
+	slog.Info("Exiting")
 }

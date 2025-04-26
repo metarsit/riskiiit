@@ -47,7 +47,7 @@ func (c *WSClient) Close() {
 	c.client.Close()
 }
 
-func (c *WSClient) Subscribe() error {
+func (c *WSClient) Subscribe(ch chan<- SpinResolvedEvent) error {
 	query := ethereum.FilterQuery{
 		Addresses: []common.Address{riskiiitAddress},
 	}
@@ -93,7 +93,7 @@ func (c *WSClient) Subscribe() error {
 				continue
 			}
 
-			slog.Info("Event", "event", spinEvent.String())
+			ch <- spinEvent
 		}
 	}
 }
